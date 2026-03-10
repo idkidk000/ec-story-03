@@ -8,31 +8,17 @@ enum WeakBehaviour {
   Replace,
 }
 
-interface Parsed {
-  id: number;
-  plug: string;
-  leftSocket: string;
-  rightSocket: string;
-  data: unknown;
-}
-
 class Node {
   left: Node | null = null;
   right: Node | null = null;
-  parent: Node | null = null;
-  readonly id: number;
-  readonly plug: string;
-  readonly leftSocket: string;
-  readonly rightSocket: string;
-  readonly data: unknown;
 
-  constructor({ id, plug, leftSocket, rightSocket, data }: Parsed) {
-    this.id = id;
-    this.plug = plug;
-    this.leftSocket = leftSocket;
-    this.rightSocket = rightSocket;
-    this.data = data;
-  }
+  constructor(
+    public readonly id: number,
+    public readonly plug: string,
+    public readonly leftSocket: string,
+    public readonly rightSocket: string,
+    public readonly isRoot: boolean,
+  ) {}
 
   get plugParts(): string[] {
     return this.plug.split(' ');
@@ -58,93 +44,90 @@ class Node {
     return false;
   }
 
-  place(
-    node: Node,
-    behaviour: WeakBehaviour = WeakBehaviour.None,
-    // obj so it's passed by ref and therefore updatable back to the root
-    insert: {
-      after: Node;
-      inhibit: boolean;
-    } | null = null,
-  ): boolean | { replaced: Node; by: Node } {
+  // wrappedNode so i can replace `node` inside the recursion and have it backpropagate
+  place(wrappedNode: { node: Node }, behaviour: WeakBehaviour, logger: Logger): boolean {
     switch (behaviour) {
       case WeakBehaviour.None: {
-        if (!this.left && node.plug === this.leftSocket) {
-          this.left = node;
+        if (!this.left && wrappedNode.node.plug === this.leftSocket) {
+          this.left = wrappedNode.node;
           return true;
         }
 
-        if (this.left?.place(node, behaviour, insert)) return true;
+        if (this.left?.place(wrappedNode, behaviour, logger)) return true;
 
-        if (!this.right && node.plug === this.rightSocket) {
-          this.right = node;
+        if (!this.right && wrappedNode.node.plug === this.rightSocket) {
+          this.right = wrappedNode.node;
           return true;
         }
 
-        if (this.right?.place(node, behaviour, insert)) return true;
+        if (this.right?.place(wrappedNode, behaviour, logger)) return true;
 
         return false;
       }
 
       case WeakBehaviour.Allow: {
-        if (!this.left && node.plugParts.some((part) => this.leftParts.includes(part))) {
-          this.left = node;
+        if (!this.left && wrappedNode.node.plugParts.some((part) => this.leftParts.includes(part))) {
+          this.left = wrappedNode.node;
           return true;
         }
 
-        if (this.left?.place(node, behaviour, insert)) return true;
+        if (this.left?.place(wrappedNode, behaviour, logger)) return true;
 
-        if (!this.right && node.plugParts.some((part) => this.rightParts.includes(part))) {
-          this.right = node;
+        if (!this.right && wrappedNode.node.plugParts.some((part) => this.rightParts.includes(part))) {
+          this.right = wrappedNode.node;
           return true;
         }
 
-        if (this.right?.place(node, behaviour, insert)) return true;
+        if (this.right?.place(wrappedNode, behaviour, logger)) return true;
 
         return false;
       }
 
       case WeakBehaviour.Replace: {
-        console.log({ id: node.id, insert }, this);
-        if (!insert?.inhibit) {
-          if (!this.left && node.plugParts.some((part) => this.leftParts.includes(part))) {
-            this.left = node;
-            node.parent = this;
-            return true;
-          }
-          if (!this.leftStrong && node.plug === this.leftSocket) {
-            const existing = this.left;
-            this.left = node;
-            node.parent = this;
-            if (existing) return { replaced: existing, by: node };
-            return true;
-          }
-        }
-        const placedLeft = this.left?.place(node, behaviour, insert);
-        if (placedLeft) return placedLeft;
+        // inhibit recursion branches for replaced nodes
+        let inhibitLeft = false;
+        let inhibitRight = false;
 
-        if (!insert?.inhibit) {
-          if (!this.right && node.plugParts.some((part) => this.rightParts.includes(part))) {
-            this.right = node;
-            node.parent = this;
-            return true;
-          }
-          if (!this.rightStrong && node.plug === this.rightSocket) {
-            const existing = this.right;
-            this.right = node;
-            node.parent = this;
-            if (existing) return { replaced: existing, by: node };
-            return true;
-          }
-        }
-        const placedRight = this.right?.place(node, behaviour, insert);
-        if (placedRight) return placedRight;
+        logger.info('enter place id', wrappedNode.node.id, 'branch', this);
 
-        // `insert.inhibit` should now backpropagate
-        if (insert?.after === this) {
-          console.log('uninhibiting');
-          insert.inhibit = false;
+        if (!this.left && wrappedNode.node.plugParts.some((part) => this.leftParts.includes(part))) {
+          this.left = wrappedNode.node;
+          return true;
         }
+
+        if (!this.leftStrong && wrappedNode.node.plug === this.leftSocket) {
+          const existing = this.left;
+          this.left = wrappedNode.node;
+          if (existing) {
+            logger.warn('replaced', existing, 'with', wrappedNode.node);
+            wrappedNode.node = existing;
+            inhibitLeft = true;
+          } else { return true; }
+        }
+
+        if (!inhibitLeft && this.left?.place(wrappedNode, behaviour, logger)) return true;
+
+        if (!this.right && wrappedNode.node.plugParts.some((part) => this.rightParts.includes(part))) {
+          this.right = wrappedNode.node;
+          return true;
+        }
+
+        if (!this.rightStrong && wrappedNode.node.plug === this.rightSocket) {
+          const existing = this.right;
+          this.right = wrappedNode.node;
+          if (existing) {
+            logger.warn('replaced', existing, 'with', wrappedNode.node);
+            wrappedNode.node = existing;
+            inhibitRight = true;
+          } else { return true; }
+        }
+
+        if (!inhibitRight && this.right?.place(wrappedNode, behaviour, logger)) return true;
+
+        // BUG: if this is the root node and wrappedNode was replaced, need to re-run `place` from the top
+        // FIXME: this is quite stupid
+        if (this.isRoot) return this.place(wrappedNode, behaviour, logger);
+
         return false;
       }
 
@@ -164,15 +147,18 @@ class Node {
   [inspect.custom]() {
     return {
       id: this.id,
+      isRoot: this.isRoot,
       left: this.left,
       right: this.right,
     };
   }
 }
 
-function part1(data: Parsed[], logger: Logger) {
-  const root = new Node(data[0]);
-  for (const node of data.slice(1)) root.place(new Node(node), WeakBehaviour.None);
+function part1(root: Node, nodes: Node[], logger: Logger) {
+  for (const node of nodes) {
+    if (!root.place({ node }, WeakBehaviour.None, logger))
+      throw new Error(`could not place node ${JSON.stringify(node)}`);
+  }
   logger.debugLow(root, root.read());
   const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
 
@@ -180,9 +166,11 @@ function part1(data: Parsed[], logger: Logger) {
   logger.success(checksum);
 }
 
-function part2(data: Parsed[], logger: Logger) {
-  const root = new Node(data[0]);
-  for (const node of data.slice(1)) root.place(new Node(node), WeakBehaviour.Allow);
+function part2(root: Node, nodes: Node[], logger: Logger) {
+  for (const node of nodes) {
+    if (!root.place({ node }, WeakBehaviour.Allow, logger))
+      throw new Error(`could not place node ${JSON.stringify(node)}`);
+  }
   logger.debugLow(root, root.read());
   const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
 
@@ -190,34 +178,33 @@ function part2(data: Parsed[], logger: Logger) {
   logger.success(checksum);
 }
 
-function part3(data: Parsed[], logger: Logger) {
-  const root = new Node(data[0]);
-  for (const node of data.slice(1)) {
-    // result is the replaced node or boolean
-    const result = root.place(new Node(node), WeakBehaviour.Replace);
-    if (typeof result === 'object')
-      root.place(result.replaced, WeakBehaviour.Replace, { after: result.by, inhibit: true });
+function part3(root: Node, nodes: Node[], logger: Logger) {
+  for (const node of nodes) {
+    if (!root.place({ node }, WeakBehaviour.Replace, logger))
+      throw new Error(`could not place node ${JSON.stringify(node)}`);
   }
   logger.debugLow(root, root.read());
   const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
 
+  // 406577
   logger.success(checksum);
 }
 
 function main() {
   const { data, logger, part } = new EcArgParser(import.meta.url);
 
-  const parsed: Parsed[] = data.split('\n').map((line) => {
-    const keyVals = line.split(', ').map((token) => token.split('=')) as [keyof Parsed, string][];
-    const node: Partial<Parsed> = {};
-    // @ts-ignore FIXME
-    for (const [key, val] of keyVals) node[key] = key === 'id' ? parseInt(val) : val;
-    return node as Parsed;
-  });
+  const [root, ...nodes] = data.matchAll(
+    /^id=(?<id>\d+), plug=(?<plug>[A-Z ]+), leftSocket=(?<leftSocket>[A-Z ]+), rightSocket=(?<rightSocket>[A-Z ]+),/gm,
+  ).filter((match): match is typeof match & { groups: Record<'id' | 'plug' | 'leftSocket' | 'rightSocket', string> } =>
+    typeof match.groups !== 'undefined'
+  )
+    .map((match, i) =>
+      new Node(parseInt(match.groups.id), match.groups.plug, match.groups.leftSocket, match.groups.rightSocket, i === 0)
+    ).toArray();
 
-  if (part === 1) part1(parsed, logger.makeChild('part1'));
-  if (part === 2) part2(parsed, logger.makeChild('part2'));
-  if (part === 3) part3(parsed, logger.makeChild('part3'));
+  if (part === 1) part1(root, nodes, logger.makeChild('part1'));
+  if (part === 2) part2(root, nodes, logger.makeChild('part2'));
+  if (part === 3) part3(root, nodes, logger.makeChild('part3'));
 }
 
 main();
