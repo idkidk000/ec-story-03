@@ -1,13 +1,13 @@
 import { EcArgParser } from '@/lib/args.1.ts';
 import { Logger } from '@/lib/logger.0.ts';
 
-function part1(_data: string, _logger: Logger) {
+function part1(data: string, logger: Logger) {
 }
 
-function part2(_data: string, _logger: Logger) {
+function part2(data: string, logger: Logger) {
 }
 
-function part3(_data: string, _logger: Logger) {
+function part3(data: string, logger: Logger) {
 }
 
 function main() {

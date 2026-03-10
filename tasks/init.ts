@@ -20,9 +20,9 @@ const day = parseInt(Deno.args.at(0) ?? '');
 const part = parseInt(Deno.args.at(1) ?? '1');
 if (isNaN(day)) throw new Error('missing required day number arg');
 
-const textFiles = [`sample${part}.txt`, `part${part}.txt`];
 const directory = join('day', day.toString().padStart(2, '0'));
 const main = join(directory, 'main.ts');
+const textFiles = [`sample${part}.txt`, `part${part}.txt`].map((name) => join(directory, name));
 
 await mkdir(directory, { recursive: true });
 if (await exists(main)) logger.warn(main, 'already exists');
@@ -31,6 +31,6 @@ else {
   logger.success('created', main);
 }
 
-const [command, ...args] = [...editor, main, ...textFiles.map((name) => join(directory, name))];
+const [command, ...args] = [...editor, main, ...textFiles];
 spawn(command, args);
 logger.info(command, ...args);

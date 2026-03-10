@@ -1,8 +1,8 @@
 {
-  "exclude": [
-    "lib"
-  ],
   "fmt": {
+    "exclude": [
+      "lib"
+    ],
     "lineWidth": 120,
     "singleQuote": true,
     "trailingCommas": "onlyMultiLine",
@@ -12,6 +12,10 @@
     "@/": "./"
   },
   "lint": {
+    "exclude": [
+      "lib",
+      "meta/template.ts"
+    ],
     "rules": {
       "include": [
         "no-console",
