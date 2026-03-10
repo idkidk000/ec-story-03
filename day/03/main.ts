@@ -1,7 +1,8 @@
 import { EcArgParser } from '@/lib/args.1.ts';
 import { Logger } from '@/lib/logger.0.ts';
+import { inspect } from 'node:util';
 
-interface Node {
+interface Parsed {
   id: number;
   plug: string;
   leftSocket: string;
@@ -9,125 +10,79 @@ interface Node {
   data: unknown;
 }
 
-function part1(nodes: Node[], logger: Logger) {
-  logger.debugLow(nodes);
+class Node {
+  left: Node | null = null;
+  right: Node | null = null;
+  readonly id: number;
+  readonly plug: string;
+  readonly leftSocket: string;
+  readonly rightSocket: string;
+  readonly data: unknown;
 
-  // binary tree
-  // children are at (ix*2)+[1|2]
-  // parent is at Math.floor((ix-1)/2)
-  // 7 8  9 10  11 12  13 14
-  //  3    4      5      6
-  //    1            2
-  //          0
-  const tree: Node[] = [];
-
-  // place
-  for (const node of nodes) {
-    if (tree.length === 0) {
-      tree[0] = node;
-      continue;
-    }
-    let placed = false;
-    for (let i = 0; !placed && i < tree.length; ++i) {
-      const existing = tree[i];
-      if (typeof existing === 'undefined') continue;
-      const leftIx = (i * 2) + 1;
-      const rightIx = (i * 2) + 2;
-      if (existing.leftSocket === node.plug && typeof tree[leftIx] === 'undefined') {
-        tree[leftIx] = node;
-        placed = true;
-      } else if (existing.rightSocket === node.plug && typeof tree[rightIx] === 'undefined') {
-        tree[rightIx] = node;
-        placed = true;
-      }
-    }
-    if (!placed) {
-      logger.error({ node, tree });
-      throw new Error('could not place node');
-    }
-  }
-  logger.info(tree.entries().toArray());
-
-  // read
-  // perimieter walk
-  enum Operation {
-    Left,
-    Read,
-    Right,
-  }
-  let ix = 0;
-  let operation: Operation = 0;
-  const ids: number[] = [];
-
-  while (ids.length < nodes.length) {
-    const leftIx = ix * 2 + 1;
-    const rightIx = ix * 2 + 2;
-    const parentIx = Math.floor((ix - 1) / 2);
-    let nextOperation: Operation = operation;
-    let nextIx: number = ix;
-
-    switch (operation) {
-      case Operation.Left: {
-        if (tree[leftIx]) nextIx = leftIx;
-        else ++nextOperation;
-        break;
-      }
-      case Operation.Read: {
-        ids.push(tree[ix].id);
-        ++nextOperation;
-        break;
-      }
-      case Operation.Right: {
-        // probably need another operation type?
-        if (tree[rightIx] && !ids.includes(tree[rightIx].id)) {
-          nextIx = rightIx;
-          nextOperation = Operation.Left;
-        } else {
-          nextIx = parentIx;
-          // if we're a left child, read the parent
-          if (ix % 2) nextOperation = Operation.Read;
-        }
-        break;
-      }
-      default:
-        throw new Error(`unhandled operation ${operation}`);
-    }
-
-    logger.debugLow({
-      ix,
-      id: tree[ix].id,
-      leftIx,
-      rightIx,
-      parentIx,
-      operation: operation === Operation.Left ? 'left' : operation === Operation.Read ? 'read' : 'right',
-      ids,
-    });
-
-    operation = nextOperation;
-    ix = nextIx;
+  constructor({ id, plug, leftSocket, rightSocket, data }: Parsed) {
+    this.id = id;
+    this.plug = plug;
+    this.leftSocket = leftSocket;
+    this.rightSocket = rightSocket;
+    this.data = data;
   }
 
-  const checksum = ids.reduce((acc, item, i) => acc + ((i + 1) * item), 0);
+  place(node: Node): boolean {
+    if (!this.left && this.leftSocket === node.plug) {
+      this.left = node;
+      return true;
+    }
+    if (this.left && this.left.place(node)) return true;
+    if (!this.right && this.rightSocket === node.plug) {
+      this.right = node;
+      return true;
+    }
+    if (this.right && this.right.place(node)) return true;
+    return false;
+  }
 
-  // 6850 length correct, first digit incorrect
+  read(): number[] {
+    const result: number[] = [];
+    if (this.left) result.push(...this.left.read());
+    result.push(this.id);
+    if (this.right) result.push(...this.right.read());
+    return result;
+  }
+
+  [inspect.custom]() {
+    return {
+      id: this.id,
+      left: this.left,
+      right: this.right,
+    };
+  }
+}
+
+function part1(data: Parsed[], logger: Logger) {
+  const root = new Node(data[0]);
+  for (const node of data.slice(1)) root.place(new Node(node));
+  logger.debugLow(root, root.read());
+  const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
+
+  // 5904
   logger.success(checksum);
 }
 
-function part2(nodes: Node[], logger: Logger) {
+function part2(nodes: Parsed[], logger: Logger) {
 }
 
-function part3(nodes: Node[], logger: Logger) {
+function part3(nodes: Parsed[], logger: Logger) {
 }
 
 function main() {
   const { data, logger, part } = new EcArgParser(import.meta.url);
 
-  const parsed: Node[] = data.split('\n').map((line) => {
-    const keyVals = line.split(', ').map((token) => token.split('=')) as [keyof Node, string][];
-    const node: Partial<Node> = {};
-    // @ts-ignore TODO: fix later
+  const parsed: Parsed[] = data.split('\n').map((line) => {
+    const keyVals = line.split(', ').map((token) => token.split('=')) as [keyof Parsed, string][];
+    const node: Partial<Parsed> = {};
+    // @ts-ignore FIXME
     for (const [key, val] of keyVals) node[key] = key === 'id' ? parseInt(val) : val;
-    return node as Node;
+    return node as Parsed;
   });
 
   if (part === 1) part1(parsed, logger.makeChild('part1'));
