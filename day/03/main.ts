@@ -27,17 +27,43 @@ class Node {
     this.data = data;
   }
 
-  place(node: Node): boolean {
-    if (!this.left && this.leftSocket === node.plug) {
+  get plugParts(): string[] {
+    return this.plug.split(' ');
+  }
+
+  get leftParts(): string[] {
+    return this.leftSocket.split(' ');
+  }
+
+  get rightParts(): string[] {
+    return this.rightSocket.split(' ');
+  }
+
+  place(node: Node, allowWeak = false): boolean {
+    if (
+      !this.left && (
+        this.leftSocket === node.plug ||
+        (
+          allowWeak && this.leftParts.some((part) => node.plugParts.includes(part))
+        )
+      )
+    ) {
       this.left = node;
       return true;
     }
-    if (this.left && this.left.place(node)) return true;
-    if (!this.right && this.rightSocket === node.plug) {
+    if (this.left && this.left.place(node, allowWeak)) return true;
+    if (
+      !this.right && (
+        this.rightSocket === node.plug ||
+        (
+          allowWeak && this.rightParts.some((part) => node.plugParts.includes(part))
+        )
+      )
+    ) {
       this.right = node;
       return true;
     }
-    if (this.right && this.right.place(node)) return true;
+    if (this.right && this.right.place(node, allowWeak)) return true;
     return false;
   }
 
@@ -68,7 +94,13 @@ function part1(data: Parsed[], logger: Logger) {
   logger.success(checksum);
 }
 
-function part2(nodes: Parsed[], logger: Logger) {
+function part2(data: Parsed[], logger: Logger) {
+  const root = new Node(data[0]);
+  for (const node of data.slice(1)) root.place(new Node(node), true);
+  logger.debugLow(root, root.read());
+  const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
+
+  logger.success(checksum);
 }
 
 function part3(nodes: Parsed[], logger: Logger) {
