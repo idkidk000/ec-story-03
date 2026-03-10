@@ -21,7 +21,7 @@ function part1(data: Parsed[], logger: Logger) {
 }
 
 function part2(data: Parsed[], logger: Logger) {
-  const maxShine = data.toSorted((a, b) => b.shine - a.shine)[0].shine;
+  const maxShine = Math.max(...data.map(({ shine }) => shine));
   const result = data.filter((item) => item.shine === maxShine).toSorted((a, b) => a.value - b.value)[0].id;
 
   // 75681
@@ -29,7 +29,7 @@ function part2(data: Parsed[], logger: Logger) {
 }
 
 function part3(data: Parsed[], logger: Logger) {
-  const groups = Array.from({ length: 6 }, () => new Array<number>());
+  const groups: number[][] = Array.from({ length: 6 }, () => []);
 
   for (const item of data) {
     const dominant = item.red > item.blue && item.red > item.green

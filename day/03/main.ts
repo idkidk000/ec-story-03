@@ -8,77 +8,71 @@ enum WeakBehaviour {
   Replace,
 }
 
+enum Strength {
+  None,
+  Weak,
+  Strong,
+}
+
+class Interface {
+  colour: string;
+  shape: string;
+
+  constructor(value: string) {
+    [this.colour, this.shape] = value.split(' ', 2);
+  }
+
+  strength(other: Interface): Strength {
+    if (this.colour === other.colour && this.shape === other.shape) return Strength.Strong;
+    if (this.colour === other.colour || this.shape === other.shape) return Strength.Weak;
+    return Strength.None;
+  }
+
+  [inspect.custom]() {
+    return [this.colour, this.shape];
+  }
+}
+
 class Node {
-  left: Node | null = null;
-  right: Node | null = null;
+  readonly plug: Interface;
+  readonly leftSocket: Interface;
+  readonly rightSocket: Interface;
+
+  leftNode: Node | null = null;
+  rightNode: Node | null = null;
 
   constructor(
     public readonly id: number,
-    public readonly plug: string,
-    public readonly leftSocket: string,
-    public readonly rightSocket: string,
+    plug: string,
+    leftSocket: string,
+    rightSocket: string,
     public readonly isRoot: boolean,
-  ) {}
-
-  get plugParts(): string[] {
-    return this.plug.split(' ');
-  }
-
-  get leftParts(): string[] {
-    return this.leftSocket.split(' ');
-  }
-
-  get rightParts(): string[] {
-    return this.rightSocket.split(' ');
-  }
-
-  get leftStrong(): boolean | null {
-    if (!this.left) return null;
-    if (this.left.plug === this.leftSocket) return true;
-    return false;
-  }
-
-  get rightStrong(): boolean | null {
-    if (!this.right) return null;
-    if (this.right.plug === this.rightSocket) return true;
-    return false;
+  ) {
+    this.plug = new Interface(plug);
+    this.leftSocket = new Interface(leftSocket);
+    this.rightSocket = new Interface(rightSocket);
   }
 
   // wrappedNode so i can replace `node` inside the recursion and have it backpropagate
   place(wrappedNode: { node: Node }, behaviour: WeakBehaviour, logger: Logger): boolean {
     switch (behaviour) {
-      case WeakBehaviour.None: {
-        if (!this.left && wrappedNode.node.plug === this.leftSocket) {
-          this.left = wrappedNode.node;
-          return true;
-        }
-
-        if (this.left?.place(wrappedNode, behaviour, logger)) return true;
-
-        if (!this.right && wrappedNode.node.plug === this.rightSocket) {
-          this.right = wrappedNode.node;
-          return true;
-        }
-
-        if (this.right?.place(wrappedNode, behaviour, logger)) return true;
-
-        return false;
-      }
-
+      case WeakBehaviour.None:
       case WeakBehaviour.Allow: {
-        if (!this.left && wrappedNode.node.plugParts.some((part) => this.leftParts.includes(part))) {
-          this.left = wrappedNode.node;
+        const minStrength = behaviour === WeakBehaviour.None ? Strength.Strong : Strength.Weak;
+
+        if (!this.leftNode && this.leftSocket.strength(wrappedNode.node.plug) >= minStrength) {
+          this.leftNode = wrappedNode.node;
           return true;
         }
 
-        if (this.left?.place(wrappedNode, behaviour, logger)) return true;
+        if (this.leftNode?.place(wrappedNode, behaviour, logger)) return true;
 
-        if (!this.right && wrappedNode.node.plugParts.some((part) => this.rightParts.includes(part))) {
-          this.right = wrappedNode.node;
+        if (!this.rightNode && this.rightSocket.strength(wrappedNode.node.plug) >= minStrength) {
+          this.rightNode = wrappedNode.node;
           return true;
         }
 
-        if (this.right?.place(wrappedNode, behaviour, logger)) return true;
+        if (this.rightNode?.place(wrappedNode, behaviour, logger)) return true;
 
         return false;
       }
@@ -88,68 +82,81 @@ class Node {
         let inhibitLeft = false;
         let inhibitRight = false;
 
-        logger.info('enter place id', wrappedNode.node.id, 'branch', this);
+        logger.debugMed('enter place id', wrappedNode.node.id, 'branch', this);
 
-        if (!this.left && wrappedNode.node.plugParts.some((part) => this.leftParts.includes(part))) {
-          this.left = wrappedNode.node;
-          return true;
+        switch (this.leftSocket.strength(wrappedNode.node.plug)) {
+          case Strength.Weak: {
+            if (!this.leftNode) {
+              this.leftNode = wrappedNode.node;
+              return true;
+            }
+            break;
+          }
+          case Strength.Strong: {
+            if (!this.leftNode || this.leftSocket.strength(this.leftNode.plug) === Strength.Weak) {
+              const existing = this.leftNode;
+              this.leftNode = wrappedNode.node;
+              if (existing) {
+                logger.debugLow('replaced', existing, 'with', wrappedNode.node);
+                wrappedNode.node = existing;
+                inhibitLeft = true;
+              } else { return true; }
+            }
+          }
         }
 
-        if (!this.leftStrong && wrappedNode.node.plug === this.leftSocket) {
-          const existing = this.left;
-          this.left = wrappedNode.node;
-          if (existing) {
-            logger.warn('replaced', existing, 'with', wrappedNode.node);
-            wrappedNode.node = existing;
-            inhibitLeft = true;
-          } else { return true; }
+        if (!inhibitLeft && this.leftNode?.place(wrappedNode, behaviour, logger)) return true;
+
+        switch (this.rightSocket.strength(wrappedNode.node.plug)) {
+          case Strength.Weak: {
+            if (!this.rightNode) {
+              this.rightNode = wrappedNode.node;
+              return true;
+            }
+            break;
+          }
+          case Strength.Strong: {
+            if (!this.rightNode || this.rightSocket.strength(this.rightNode.plug) === Strength.Weak) {
+              const existing = this.rightNode;
+              this.rightNode = wrappedNode.node;
+              if (existing) {
+                logger.debugMed('replaced', existing, 'with', wrappedNode.node);
+                wrappedNode.node = existing;
+                inhibitRight = true;
+              } else { return true; }
+            }
+          }
         }
 
-        if (!inhibitLeft && this.left?.place(wrappedNode, behaviour, logger)) return true;
+        if (!inhibitRight && this.rightNode?.place(wrappedNode, behaviour, logger)) return true;
 
-        if (!this.right && wrappedNode.node.plugParts.some((part) => this.rightParts.includes(part))) {
-          this.right = wrappedNode.node;
-          return true;
-        }
-
-        if (!this.rightStrong && wrappedNode.node.plug === this.rightSocket) {
-          const existing = this.right;
-          this.right = wrappedNode.node;
-          if (existing) {
-            logger.warn('replaced', existing, 'with', wrappedNode.node);
-            wrappedNode.node = existing;
-            inhibitRight = true;
-          } else { return true; }
-        }
-
-        if (!inhibitRight && this.right?.place(wrappedNode, behaviour, logger)) return true;
-
-        // BUG: if this is the root node and wrappedNode was replaced, need to re-run `place` from the top
-        // FIXME: this is quite stupid
+        // if this is the root node and wrappedNode was replaced, need to re-run `place` from the top
+        // the puzzle guarantees that all nodes can be placed in a single tree so this cannot cause infinite recursion
         if (this.isRoot) return this.place(wrappedNode, behaviour, logger);
 
         return false;
       }
-
-      default:
-        throw new Error('clown emoji');
     }
   }
 
   read(): number[] {
-    const result: number[] = [];
-    if (this.left) result.push(...this.left.read());
-    result.push(this.id);
-    if (this.right) result.push(...this.right.read());
-    return result;
+    return [
+      ...this.leftNode?.read() ?? [],
+      this.id,
+      ...this.rightNode?.read() ?? [],
+    ];
+  }
+
+  checksum(): number {
+    return this.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
   }
 
   [inspect.custom]() {
     return {
       id: this.id,
       isRoot: this.isRoot,
-      left: this.left,
-      right: this.right,
+      left: this.leftNode,
+      right: this.rightNode,
     };
   }
 }
@@ -159,11 +166,8 @@ function part1(root: Node, nodes: Node[], logger: Logger) {
     if (!root.place({ node }, WeakBehaviour.None, logger))
       throw new Error(`could not place node ${JSON.stringify(node)}`);
   }
-  logger.debugLow(root, root.read());
-  const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
-
   // 5904
-  logger.success(checksum);
+  logger.success(root.checksum());
 }
 
 function part2(root: Node, nodes: Node[], logger: Logger) {
@@ -171,11 +175,8 @@ function part2(root: Node, nodes: Node[], logger: Logger) {
     if (!root.place({ node }, WeakBehaviour.Allow, logger))
       throw new Error(`could not place node ${JSON.stringify(node)}`);
   }
-  logger.debugLow(root, root.read());
-  const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
-
   // 320419
-  logger.success(checksum);
+  logger.success(root.checksum());
 }
 
 function part3(root: Node, nodes: Node[], logger: Logger) {
@@ -183,11 +184,8 @@ function part3(root: Node, nodes: Node[], logger: Logger) {
     if (!root.place({ node }, WeakBehaviour.Replace, logger))
       throw new Error(`could not place node ${JSON.stringify(node)}`);
   }
-  logger.debugLow(root, root.read());
-  const checksum = root.read().reduce((acc, item, i) => acc + ((i + 1) * item), 0);
-
   // 406577
-  logger.success(checksum);
+  logger.success(root.checksum());
 }
 
 function main() {
